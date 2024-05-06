@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/unidoc/unipdf/v3/extractor"
+	"github.com/unidoc/unipdf/v3/model"
 )
 
 type Block struct {
@@ -126,6 +129,48 @@ func ReadJSON(filename string, v interface{}) error {
 	}
 	return nil
 }
+func ReadTextFromPDF(filename string) (string, error) {
+	// Öffne die PDF-Datei.
+	f, err := os.Open(filename)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Öffne die PDF-Datei als ein PDF-Modelldokument.
+	pdfReader, err := model.NewPdfReader(f)
+	if err != nil {
+		return "", err
+	}
+
+	// Extrahiere den Text von jeder Seite der PDF-Datei.
+	var textBuilder strings.Builder
+	numPages, err := pdfReader.GetNumPages()
+	if err != nil {
+		return "", err
+	}
+	for pageNum := 1; pageNum <= numPages; pageNum++ {
+		page, err := pdfReader.GetPage(pageNum)
+		if err != nil {
+			return "", err
+		}
+
+		// Extrahiere den Text von der aktuellen Seite.
+		pageExtractor, err := extractor.New(page)
+		if err != nil {
+			return "", err
+		}
+		pageText, err := pageExtractor.ExtractText()
+		if err != nil {
+			return "", err
+		}
+
+		// Füge den extrahierten Text zur Gesamtausgabe hinzu.
+		textBuilder.WriteString(pageText)
+	}
+
+	return textBuilder.String(), nil
+}
 
 func main() {
 	chain := NewBlockchain()
@@ -139,7 +184,8 @@ func main() {
 		fmt.Println("5. Read Text from File")
 		fmt.Println("6. Read CSV from File")
 		fmt.Println("7. Read JSON from File")
-		fmt.Println("8. Quit Program")
+		fmt.Println("8. Read Text from PDF")
+		fmt.Println("9. Quit Program")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -216,6 +262,17 @@ func main() {
 				fmt.Println("JSON read from file and saved in a block:", jsonData)
 			}
 		case 8:
+			fmt.Print("Enter filename to read PDF from: ")
+			filename, _ := reader.ReadString('\n')
+			filename = strings.TrimSpace(filename)
+			text, err := ReadTextFromPDF(filename)
+			if err != nil {
+				fmt.Printf("Error reading text from PDF file: %s\n", err)
+			} else {
+				chain.AddBlock(text) // Text als Block an die Blockchain anhängen
+				fmt.Println("Text read from PDF file and saved in a block:", text)
+			}
+		case 9:
 			fmt.Println("Quitting program...")
 			os.Exit(0)
 		default:
