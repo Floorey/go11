@@ -1,0 +1,10 @@
+Data: This is the night of thruth.
+Previous Hash: 
+Timestamp: 2024-05-06 16:33:39.534993384 +0200 CEST m=+14.282138772
+Hash: ecb9d2b84d9773c2c18ba384f4131aed1c6483692dd5ed537c3539d111161ffe
+
+Data: Genesis Block
+Previous Hash: 
+Timestamp: 2024-05-06 16:33:25.252891419 +0200 CEST m=+0.000036807
+Hash: 416ae2ca559d44a69d66ebe354a9ac75a40337b609bdf895288a4050361fb536
+

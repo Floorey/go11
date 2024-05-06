@@ -1,0 +1,10 @@
+Data: This is a test for the block funktion.
+Timestamp: 2024-05-06 10:07:17.72942294 +0200 CEST m=+26.034472674
+Previous Hash: 
+Hash: 699da4e87c912e0faf36a0f70b914fa99966812e23ad3a045a071b42f6a344de
+
+Data: This is a test.
+Timestamp: 2024-05-06 11:28:47.769546202 +0200 CEST m=+23.128345738
+Previous Hash: 
+Hash: 20dca1b1cfbdb7dfc4c45bc6e8f01fce652a82899d07e08d2086044d09529ae2
+
