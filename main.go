@@ -226,41 +226,69 @@ func main() {
 			fmt.Print("Enter filename to read text from: ")
 			filename, _ := reader.ReadString('\n')
 			filename = strings.TrimSpace(filename)
-			text, err := ReadText(filename)
-			if err != nil {
-				fmt.Printf("Error reading text from file: %s\n", err)
-			} else {
-				chain.AddBlock(text) // Text als Block an die Blockchain anhängen
+			textCh := make(chan string)
+			errCh := make(chan error)
+			go func() {
+				text, err := ReadText(filename)
+				if err != nil {
+					errCh <- err
+				} else {
+					textCh <- text
+				}
+			}()
+			select {
+			case text := <-textCh:
+				chain.AddBlock(text)
 				fmt.Println("Text read from file and saved in a block:", text)
+			case err := <-errCh:
+				fmt.Printf("Error reading text from file: %s\n", err)
 			}
 		case 6:
 			fmt.Print("Enter filename to read CSV from: ")
 			filename, _ := reader.ReadString('\n')
 			filename = strings.TrimSpace(filename)
-			records, err := ReadCSV(filename)
-			if err != nil {
-				fmt.Printf("Error reading CSV from file: %s\n", err)
-			} else {
-				// Jeden Datensatz als Textblock an die Blockchain anhängen
+			recordsCh := make(chan [][]string)
+			errCh := make(chan error)
+
+			go func() {
+				records, err := ReadCSV(filename)
+				if err != nil {
+					errCh <- err
+				} else {
+					recordsCh <- records
+				}
+			}()
+			select {
+			case records := <-recordsCh:
 				for _, record := range records {
 					text := strings.Join(record, ", ")
 					chain.AddBlock(text)
 				}
 				fmt.Println("CSV read from file and saved in blocks:", records)
+			case err := <-errCh:
+				fmt.Printf("Error reading CSV from file: %s\n", err)
 			}
 		case 7:
 			fmt.Print("Enter filename to read JSON from: ")
 			filename, _ := reader.ReadString('\n')
 			filename = strings.TrimSpace(filename)
 			var jsonData interface{}
-			err := ReadJSON(filename, &jsonData)
-			if err != nil {
+			errCh := make(chan error)
+			go func() {
+				err := ReadJSON(filename, &jsonData)
+				if err != nil {
+					errCh <- err
+				}
+			}()
+			select {
+			case err := <-errCh:
 				fmt.Printf("Error reading JSON from file: %s\n", err)
-			} else {
+			default:
 				jsonText, _ := json.Marshal(jsonData)
-				chain.AddBlock(string(jsonText)) // JSON als Block an die Blockchain anhängen
+				chain.AddBlock(string(jsonText))
 				fmt.Println("JSON read from file and saved in a block:", jsonData)
 			}
+
 		case 8:
 			fmt.Print("Enter filename to read PDF from: ")
 			filename, _ := reader.ReadString('\n')
