@@ -24,15 +24,17 @@ type Block struct {
 	Hash         string
 	Previous     *Block // Hinzugefügtes Feld für den vorherigen Block
 }
+
 type Blockchain struct {
-	Head *Block
-	mu   sync.Mutex
+	Head   *Block
+	mu     sync.Mutex
+	Blocks []*Block // Speichern aller Blöcke für den einfachen Zugriff
 }
 
 func NewBlockchain() *Blockchain {
 	genesisBlock := &Block{Data: "Genesis Block", PreviousHash: "", Timestamp: time.Now()}
 	calculateHashAsync(genesisBlock, "") // Berechne den Hash-Wert des Genesis-Blocks im Hintergrund
-	return &Blockchain{Head: genesisBlock}
+	return &Blockchain{Head: genesisBlock, Blocks: []*Block{genesisBlock}}
 }
 
 func (chain *Blockchain) AddBlock(data string) {
@@ -42,6 +44,7 @@ func (chain *Blockchain) AddBlock(data string) {
 	newBlock := &Block{Data: data, Previous: chain.Head, Timestamp: time.Now()}
 	go calculateHashAsync(newBlock, chain.Head.Hash)
 	chain.Head = newBlock
+	chain.Blocks = append(chain.Blocks, newBlock) // Füge den neuen Block zur Liste hinzu
 }
 
 func calculateHashAsync(block *Block, previousHash string) {
@@ -83,6 +86,14 @@ func (chain *Blockchain) LogHashesToFile(filename string) error {
 
 	return nil
 }
+
+func (chain *Blockchain) ValidateBlock(block *Block) bool {
+	// Überprüfe, ob der Hash-Wert des Blocks korrekt ist.
+	hashBytes := sha256.Sum256([]byte(block.Data + block.PreviousHash + block.Timestamp.String()))
+	hash := hex.EncodeToString(hashBytes[:])
+	return hash == block.Hash
+}
+
 func ReadText(filename string) (string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -101,6 +112,7 @@ func ReadText(filename string) (string, error) {
 	}
 	return content.String(), nil
 }
+
 func ReadCSV(filename string) ([][]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -116,6 +128,7 @@ func ReadCSV(filename string) ([][]string, error) {
 	}
 	return records, nil
 }
+
 func ReadJSON(filename string, v interface{}) error {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -129,6 +142,7 @@ func ReadJSON(filename string, v interface{}) error {
 	}
 	return nil
 }
+
 func ReadTextFromPDF(filename string) (string, error) {
 	// Öffne die PDF-Datei.
 	f, err := os.Open(filename)
@@ -185,7 +199,8 @@ func main() {
 		fmt.Println("6. Read CSV from File")
 		fmt.Println("7. Read JSON from File")
 		fmt.Println("8. Read Text from PDF")
-		fmt.Println("9. Quit Program")
+		fmt.Println("9. Validate Block")
+		fmt.Println("10. Quit Program")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -288,7 +303,6 @@ func main() {
 				chain.AddBlock(string(jsonText))
 				fmt.Println("JSON read from file and saved in a block:", jsonData)
 			}
-
 		case 8:
 			fmt.Print("Enter filename to read PDF from: ")
 			filename, _ := reader.ReadString('\n')
@@ -301,6 +315,26 @@ func main() {
 				fmt.Println("Text read from PDF file and saved in a block:", text)
 			}
 		case 9:
+			fmt.Print("Enter index of the block to validate: ")
+			indexStr, _ := reader.ReadString('\n')
+			indexStr = strings.TrimSpace(indexStr)
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				fmt.Println("Invalid index. Please enter a number!")
+				continue
+			}
+			if index < 0 || index >= len(chain.Blocks) {
+				fmt.Println("Invalid index. Please enter a valid index!")
+				continue
+			}
+			block := chain.Blocks[index]
+			valid := chain.ValidateBlock(block)
+			if valid {
+				fmt.Println("Block is valid!")
+			} else {
+				fmt.Println("Block is not valid!")
+			}
+		case 10:
 			fmt.Println("Quitting program...")
 			os.Exit(0)
 		default:
