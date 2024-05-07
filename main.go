@@ -1,18 +1,24 @@
 package main
 
+//go:generate goimports -w .
+
 import (
 	"bufio"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
 )
@@ -29,27 +35,102 @@ type Blockchain struct {
 	Head   *Block
 	mu     sync.Mutex
 	Blocks []*Block // Speichern aller Blöcke für den einfachen Zugriff
+	DB     *sql.DB  // Verweis auf die Datenbank
+}
+type Peer struct {
+	ID   int
+	IP   string
+	Port int
+}
+type Network struct {
+	Peers []*Peer
+	mu    sync.Mutex
 }
 
-func NewBlockchain() *Blockchain {
-	genesisBlock := &Block{Data: "Genesis Block", PreviousHash: "", Timestamp: time.Now()}
-	calculateHashAsync(genesisBlock, "") // Berechne den Hash-Wert des Genesis-Blocks im Hintergrund
-	return &Blockchain{Head: genesisBlock, Blocks: []*Block{genesisBlock}}
+func NewNetwork() *Network {
+	return &Network{
+		Peers: []*Peer{},
+	}
+}
+
+// add new peer to network
+func (n *Network) AddPeer(peer *Peer) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.Peers = append(n.Peers, peer)
+}
+func (n *Network) PrintPeers() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	fmt.Println("List of Peers:")
+	for _, peer := range n.Peers {
+		fmt.Printf("ID: %d, IP: %s, Port: %d\n", peer.ID, peer.IP, peer.Port)
+	}
+}
+
+func NewBlockchain(db *sql.DB) *Blockchain {
+	// Verbindung zur SQLite-Datenbank herstellen
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS blocks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		data TEXT,
+		previous_hash TEXT,
+		timestamp TEXT,
+		hash TEXT
+	)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Beispielblock (Genesis-Block) erstellen und in die Datenbank einfügen
+	genesisBlock := &Block{
+		Data:         "Genesis Block",
+		PreviousHash: "",
+		Timestamp:    time.Now(),
+		Hash:         calculateHash("Genesis Block", ""),
+	}
+	err = insertBlock(db, genesisBlock)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &Blockchain{
+		Head:   genesisBlock,
+		Blocks: []*Block{genesisBlock},
+		DB:     db,
+	}
+}
+
+// Funktion zum Einfügen eines Blocks in die Datenbank
+func insertBlock(db *sql.DB, block *Block) error {
+	_, err := db.Exec(`INSERT INTO blocks (data, previous_hash, timestamp, hash)
+	VALUES (?, ?, ?, ?)`, block.Data, block.PreviousHash, block.Timestamp, block.Hash)
+	return err
+}
+
+func calculateHash(data string, previousHash string) string {
+	hashBytes := sha256.Sum256([]byte(data + previousHash))
+	return hex.EncodeToString(hashBytes[:])
 }
 
 func (chain *Blockchain) AddBlock(data string) {
-	chain.mu.Lock()
-	defer chain.mu.Unlock()
+	previousBlock := chain.Blocks[len(chain.Blocks)-1]
+	newBlock := &Block{
+		Data:         data,
+		PreviousHash: previousBlock.Hash,
+		Timestamp:    time.Now(),
+		Hash:         calculateHash(data, previousBlock.Hash),
+	}
 
-	newBlock := &Block{Data: data, Previous: chain.Head, Timestamp: time.Now()}
-	go calculateHashAsync(newBlock, chain.Head.Hash)
-	chain.Head = newBlock
-	chain.Blocks = append(chain.Blocks, newBlock) // Füge den neuen Block zur Liste hinzu
-}
+	// Block in die Datenbank einfügen, wenn die Datenbank vorhanden ist
+	if chain.DB != nil {
+		err := insertBlock(chain.DB, newBlock)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
-func calculateHashAsync(block *Block, previousHash string) {
-	hashBytes := sha256.Sum256([]byte(block.Data + previousHash + block.Timestamp.String()))
-	block.Hash = hex.EncodeToString(hashBytes[:])
+	// Neuen Block zur Blockchain hinzufügen
+	chain.Blocks = append(chain.Blocks, newBlock)
 }
 
 func (chain *Blockchain) PrintBlockchain() {
@@ -89,8 +170,7 @@ func (chain *Blockchain) LogHashesToFile(filename string) error {
 
 func (chain *Blockchain) ValidateBlock(block *Block) bool {
 	// Überprüfe, ob der Hash-Wert des Blocks korrekt ist.
-	hashBytes := sha256.Sum256([]byte(block.Data + block.PreviousHash + block.Timestamp.String()))
-	hash := hex.EncodeToString(hashBytes[:])
+	hash := calculateHash(block.Data, block.PreviousHash)
 	return hash == block.Hash
 }
 
@@ -185,9 +265,58 @@ func ReadTextFromPDF(filename string) (string, error) {
 
 	return textBuilder.String(), nil
 }
+func PrintBlockByIndex(chain *Blockchain, index int) {
+	if index < 0 || index >= len(chain.Blocks) {
+		fmt.Println("Invalid index. Please enter a valid index.")
+		return
+	}
+	block := chain.Blocks[index]
+	fmt.Printf("Block at index %d:\n", index)
+	fmt.Printf("Data: %s\nPrevious Hash: %s\nTimestamp: %s\nHash: %s\n\n",
+		block.Data, block.PreviousHash, block.Timestamp, block.Hash)
+
+	// Ausgabe des vorherigen Hash-Werts, wenn verfügbar
+	if block.Previous != nil {
+		fmt.Printf("Previous Hash: %s\n", block.Previous.Hash)
+	} else {
+		fmt.Println("This is the genesis block, so there is no previous hash.")
+	}
+}
+func TestPeers(network *Network) {
+	fmt.Println("Testing Peers...")
+	for _, peer := range network.Peers {
+		go func(peer *Peer) {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port), 5*time.Second)
+			if err != nil {
+				fmt.Printf("Failed to connect to peer %s:%d\n", peer.IP, peer.Port)
+				return
+			}
+			defer conn.Close()
+
+			fmt.Printf("Connected to peer %s:%d\n", peer.IP, peer.Port)
+
+		}(peer)
+	}
+}
 
 func main() {
-	chain := NewBlockchain()
+	db, err := sql.Open("sqlite3", "./blockchain.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	chain := NewBlockchain(db)
+
+	network := NewNetwork()
+
+	peer1 := &Peer{ID: 1, IP: "192.168.0.1", Port: 3000}
+	peer2 := &Peer{ID: 2, IP: "192.168.0.2", Port: 4000}
+
+	network.AddPeer(peer1)
+	network.AddPeer(peer2)
+
+	network.PrintPeers()
 
 	for {
 		fmt.Println("Choose an option:")
@@ -200,7 +329,9 @@ func main() {
 		fmt.Println("7. Read JSON from File")
 		fmt.Println("8. Read Text from PDF")
 		fmt.Println("9. Validate Block")
-		fmt.Println("10. Quit Program")
+		fmt.Println("10. Print specific Block")
+		fmt.Println("11. Toggle Block Saving to Database")
+		fmt.Println("12. Quit")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -335,8 +466,27 @@ func main() {
 				fmt.Println("Block is not valid!")
 			}
 		case 10:
-			fmt.Println("Quitting program...")
+			fmt.Println("Enter index of the block to display:")
+			indexStr, _ := reader.ReadString('\n')
+			indexStr = strings.TrimSpace(indexStr)
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				fmt.Println("Invalid index. Please enter a number!")
+				continue
+			}
+			PrintBlockByIndex(chain, index)
+		case 11:
+			if chain.DB != nil {
+				fmt.Println("Blockchain saving to database is currently enabled. Disabling...")
+				chain.DB = nil
+			} else {
+				fmt.Println("Blockchain saving to database is currently disabled. Enabling...")
+				chain.DB = db
+			}
+		case 12:
+			fmt.Println("Exit!")
 			os.Exit(0)
+
 		default:
 			fmt.Println("Invalid option!")
 		}
