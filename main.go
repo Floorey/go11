@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -24,6 +25,7 @@ import (
 )
 
 type Block struct {
+	ID           int
 	Data         string
 	PreviousHash string
 	Timestamp    time.Time
@@ -45,6 +47,21 @@ type Peer struct {
 type Network struct {
 	Peers []*Peer
 	mu    sync.Mutex
+}
+
+func isValidSHA256Proof(hash string) bool {
+	requiredLeadingZeros := 4
+
+	hashBytes, err := hex.DecodeString(hash)
+	if err != nil {
+		return false
+	}
+	for i := 0; i < requiredLeadingZeros/2; i++ {
+		if hashBytes[i] != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func NewNetwork() *Network {
@@ -111,6 +128,24 @@ func calculateHash(data string, previousHash string) string {
 	hashBytes := sha256.Sum256([]byte(data + previousHash))
 	return hex.EncodeToString(hashBytes[:])
 }
+func isValidProof(hash string) bool {
+	return strings.HasPrefix(hash, "0000")
+}
+func (chain *Blockchain) ValidateBlock(block *Block) bool {
+	// Überprüfen, ob der Blockhash gültig ist
+	if !isValidSHA256Proof(block.Hash) {
+		return false
+	}
+
+	// Überprüfen, ob der Hash des vorherigen Blocks mit dem PreviousHash des aktuellen Blocks übereinstimmt
+	if block.Previous != nil && block.Previous.Hash != block.PreviousHash {
+		return false
+	}
+
+	// Weitere Validierungsschritte hier hinzufügen, falls erforderlich...
+
+	return true
+}
 
 func (chain *Blockchain) AddBlock(data string) {
 	previousBlock := chain.Blocks[len(chain.Blocks)-1]
@@ -166,12 +201,6 @@ func (chain *Blockchain) LogHashesToFile(filename string) error {
 	}
 
 	return nil
-}
-
-func (chain *Blockchain) ValidateBlock(block *Block) bool {
-	// Überprüfe, ob der Hash-Wert des Blocks korrekt ist.
-	hash := calculateHash(block.Data, block.PreviousHash)
-	return hash == block.Hash
 }
 
 func ReadText(filename string) (string, error) {
@@ -298,6 +327,89 @@ func TestPeers(network *Network) {
 		}(peer)
 	}
 }
+func loadImageFromJPEG(filename string) ([]byte, error) {
+	imageData, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	return imageData, nil
+}
+
+// RetrieveBlocksFromDB ruft alle Blöcke aus der Datenbank ab und gibt sie zurück.
+func RetrieveBlocksFromDB(db *sql.DB) ([]*Block, error) {
+	rows, err := db.Query("SELECT id, data, previous_hash, timestamp, hash FROM blocks")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var blocks []*Block
+	for rows.Next() {
+		var id int
+		var data, previousHash, timestampStr, hash string
+		if err := rows.Scan(&id, &data, &previousHash, &timestampStr, &hash); err != nil {
+			return nil, err
+		}
+		timestamp, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", timestampStr)
+		if err != nil {
+			return nil, err
+		}
+		block := &Block{
+			ID:           id,
+			Data:         data,
+			PreviousHash: previousHash,
+			Timestamp:    timestamp,
+			Hash:         hash,
+		}
+		blocks = append(blocks, block)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return blocks, nil
+}
+
+// VerifyBlockIDs überprüft, ob die IDs der Blöcke eindeutig sind und ob es keine doppelten Hashes gibt.
+func VerifyBlockIDs(blocks []*Block) error {
+	existingIDs := make(map[int]bool)
+	existingHashes := make(map[string]bool)
+
+	for _, block := range blocks {
+		// Überprüfen, ob die ID bereits existiert
+		if existingIDs[block.ID] {
+			return fmt.Errorf("duplicate block ID: %d", block.ID)
+		}
+		existingIDs[block.ID] = true
+
+		// Überprüfen, ob der Hash bereits existiert
+		if existingHashes[block.Hash] {
+			return fmt.Errorf("duplicate block hash: %s", block.Hash)
+		}
+		existingHashes[block.Hash] = true
+	}
+
+	return nil
+}
+func LoadBlockFromDB(db *sql.DB, id int) (*Block, error) {
+	var data, previousHash, timestampStr, hash string
+	err := db.QueryRow("SELECT data, previous_hash, timestamp, hash FROM blocks WHERE id=?", id).
+		Scan(&data, &previousHash, &timestampStr, &hash)
+	if err != nil {
+		return nil, err
+	}
+	timestamp, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", timestampStr)
+	if err != nil {
+		return nil, err
+	}
+	return &Block{
+		ID:           id,
+		Data:         data,
+		PreviousHash: previousHash,
+		Timestamp:    timestamp,
+		Hash:         hash,
+	}, nil
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -331,7 +443,9 @@ func main() {
 		fmt.Println("9. Validate Block")
 		fmt.Println("10. Print specific Block")
 		fmt.Println("11. Toggle Block Saving to Database")
-		fmt.Println("12. Quit")
+		fmt.Println("12. Read jpeg-image.")
+		fmt.Println("13. Load blocks from DB")
+		fmt.Println("14. Exit!")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -446,7 +560,8 @@ func main() {
 				fmt.Println("Text read from PDF file and saved in a block:", text)
 			}
 		case 9:
-			fmt.Print("Enter index of the block to validate: ")
+			// Code für Option 9 (Block validieren)
+			fmt.Println("Enter index of the block to validate: ")
 			indexStr, _ := reader.ReadString('\n')
 			indexStr = strings.TrimSpace(indexStr)
 			index, err := strconv.Atoi(indexStr)
@@ -484,6 +599,37 @@ func main() {
 				chain.DB = db
 			}
 		case 12:
+			fmt.Print("Enter path to JPEG image: ")
+			imagePath, _ := reader.ReadString('\n')
+			imagePath = strings.TrimSpace(imagePath)
+			imageData, err := loadImageFromJPEG(imagePath)
+			if err != nil {
+				fmt.Printf("Error loading image: %s\n", err)
+				continue
+			}
+			// Konvertieren Sie die Bilddaten in eine Zeichenfolge und speichern Sie sie in einem Block
+			imageStr := string(imageData)
+			chain.AddBlock(imageStr)
+			fmt.Println("Image saved in a block.")
+		case 13:
+			fmt.Println("Enter the ID of the block to load:")
+			idStr, _ := reader.ReadString('\n')
+			idStr = strings.TrimSpace(idStr)
+			id, err := strconv.Atoi(idStr)
+			if err != nil {
+				fmt.Println("Invalid block ID. Please enter a valid number!")
+				continue
+			}
+			block, err := LoadBlockFromDB(db, id)
+			if err != nil {
+				fmt.Printf("Error loading block with ID %d: %s\n", id, err)
+				continue
+			}
+			fmt.Printf("Block with ID %d loaded successfully:\n", id)
+			fmt.Printf("Data: %s\nPrevious Hash: %s\nTimestamp: %s\nHash: %s\n",
+				block.Data, block.PreviousHash, block.Timestamp, block.Hash)
+
+		case 14:
 			fmt.Println("Exit!")
 			os.Exit(0)
 
