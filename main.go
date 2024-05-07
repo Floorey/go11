@@ -4,12 +4,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io/ioutil"
 	"log"
 	"net"
@@ -30,7 +36,8 @@ type Block struct {
 	PreviousHash string
 	Timestamp    time.Time
 	Hash         string
-	Previous     *Block // Hinzugefügtes Feld für den vorherigen Block
+	Previous     *Block
+	Signature    []byte
 }
 
 type Blockchain struct {
@@ -148,9 +155,12 @@ func (chain *Blockchain) ValidateBlock(block *Block) bool {
 }
 
 func (chain *Blockchain) AddBlock(data string) {
+	// Vorherigen Block erhalten
 	previousBlock := chain.Blocks[len(chain.Blocks)-1]
+
+	// Neuen Block erstellen mit den übergebenen Daten
 	newBlock := &Block{
-		Data:         data,
+		Data:         data, // Übergebene Daten
 		PreviousHash: previousBlock.Hash,
 		Timestamp:    time.Now(),
 		Hash:         calculateHash(data, previousBlock.Hash),
@@ -410,6 +420,96 @@ func LoadBlockFromDB(db *sql.DB, id int) (*Block, error) {
 		Hash:         hash,
 	}, nil
 }
+func displayImageFromBlock(block *Block) error {
+	if block.Data == "" {
+		return fmt.Errorf("Block data is empty.")
+	}
+	imageData := []byte(block.Data)
+	img, _, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return err
+
+	}
+	fmt.Println("Displaying image from block:")
+	err = jpeg.Encode(os.Stdout, img, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func generateUserKey() (*rsa.PrivateKey, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	return privateKey, nil
+}
+func signData(data []byte, privateKey *rsa.PrivateKey) ([]byte, error) {
+	// Daten mit dem privaten Schlüssel signieren
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, data)
+	if err != nil {
+		return nil, err
+	}
+	return signature, nil
+}
+func signBlock(block *Block, privatKey *rsa.PrivateKey) error {
+	blockData := []byte(fmt.Sprintf("%v", block))
+
+	signature, err := signData(blockData, privatKey)
+	if err != nil {
+		return err
+	}
+	block.Signature = signature
+
+	return nil
+}
+
+// Funktion zum Hinzufügen eines signierten Blocks zur Blockchain mit einem Benutzerschlüssel
+// Funktion zum Hinzufügen eines signierten Blocks zur Blockchain mit einem Benutzerschlüssel
+func AddSignedBlockWithUserKey(chain *Blockchain, data string, privateKey *rsa.PrivateKey) error {
+	// Datenkanal erstellen
+	dataChan := make(chan *Block)
+
+	// Go-Routine starten, um Daten in den Kanal zu senden
+	go func() {
+		// Neuen Block erstellen
+		previousBlock := chain.Blocks[len(chain.Blocks)-1]
+		newBlock := &Block{
+			Data:         data,
+			PreviousHash: previousBlock.Hash,
+			Timestamp:    time.Now(),
+			Hash:         calculateHash(data, previousBlock.Hash),
+		}
+
+		// Block signieren
+		err := signBlock(newBlock, privateKey)
+		if err != nil {
+			fmt.Println("Fehler beim Signieren des Blocks:", err)
+			return
+		}
+
+		// Block zur Blockchain hinzufügen
+		dataChan <- newBlock
+	}()
+
+	// Daten aus dem Kanal lesen und Block mit Signatur zur Blockchain hinzufügen
+	go func() {
+		for newBlock := range dataChan {
+			// Block in die Datenbank einfügen, wenn die Datenbank vorhanden ist
+			if chain.DB != nil {
+				err := insertBlock(chain.DB, newBlock)
+				if err != nil {
+					fmt.Println("Fehler beim Einfügen des Blocks in die Datenbank:", err)
+				}
+			}
+
+			// Neuen Block zur Blockchain hinzufügen
+			chain.Blocks = append(chain.Blocks, newBlock)
+		}
+	}()
+
+	return nil
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -445,7 +545,8 @@ func main() {
 		fmt.Println("11. Toggle Block Saving to Database")
 		fmt.Println("12. Read jpeg-image.")
 		fmt.Println("13. Load blocks from DB")
-		fmt.Println("14. Exit!")
+		fmt.Println("14. Load and Display Images")
+		fmt.Println("15. Exit")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -612,7 +713,17 @@ func main() {
 			chain.AddBlock(imageStr)
 			fmt.Println("Image saved in a block.")
 		case 13:
-			fmt.Println("Enter the ID of the block to load:")
+			blocks, err := RetrieveBlocksFromDB(db)
+			if err != nil {
+				fmt.Printf("Error retrieving blocks from database: %s\n", err)
+				continue
+			}
+			fmt.Println("Blocks loaded successfully from the database:")
+			for _, block := range blocks {
+				fmt.Printf("ID: %d, Data: %s, Timestamp: %s\n", block.ID, block.Data, block.Timestamp)
+			}
+		case 14:
+			fmt.Println("Enter the ID of the block to load and display the image:")
 			idStr, _ := reader.ReadString('\n')
 			idStr = strings.TrimSpace(idStr)
 			id, err := strconv.Atoi(idStr)
@@ -629,7 +740,13 @@ func main() {
 			fmt.Printf("Data: %s\nPrevious Hash: %s\nTimestamp: %s\nHash: %s\n",
 				block.Data, block.PreviousHash, block.Timestamp, block.Hash)
 
-		case 14:
+			// Anzeige des Bildes aus dem Block
+			err = displayImageFromBlock(block)
+			if err != nil {
+				fmt.Printf("Error displaying image from block: %s\n", err)
+				continue
+			}
+		case 15:
 			fmt.Println("Exit!")
 			os.Exit(0)
 
