@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -16,6 +18,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -54,6 +57,43 @@ type Peer struct {
 type Network struct {
 	Peers []*Peer
 	mu    sync.Mutex
+}
+type Transaction struct {
+	Sender    string
+	Recipient string
+	Amount    float64
+	Fee       float64
+}
+
+func CreateTransaction(sender, recipient string, amount, fee float64) *Transaction {
+	return &Transaction{
+		Sender:    sender,
+		Recipient: recipient,
+		Amount:    amount,
+		Fee:       fee,
+	}
+}
+func ValidateTransaction(tx *Transaction, senderBalance float64) bool {
+	if senderBalance < tx.Amount+tx.Fee {
+		return false
+	}
+	return true
+}
+func Executetransaction(tx *Transaction, senderBalance *float64, recipientBalance *float64) {
+	*senderBalance -= tx.Amount + tx.Fee
+	*recipientBalance += tx.Amount
+}
+func CalculateBalance(transactions []*Transaction, account string, initialBalance float64) float64 {
+	balance := initialBalance
+	for _, tx := range transactions {
+		if tx.Sender == account {
+			balance -= tx.Amount + tx.Fee
+		}
+		if tx.Recipient == account {
+			balance += tx.Amount
+		}
+	}
+	return balance
 }
 
 func isValidSHA256Proof(hash string) bool {
@@ -463,9 +503,6 @@ func signBlock(block *Block, privatKey *rsa.PrivateKey) error {
 
 	return nil
 }
-
-// Funktion zum Hinzufügen eines signierten Blocks zur Blockchain mit einem Benutzerschlüssel
-// Funktion zum Hinzufügen eines signierten Blocks zur Blockchain mit einem Benutzerschlüssel
 func AddSignedBlockWithUserKey(chain *Blockchain, data string, privateKey *rsa.PrivateKey) error {
 	// Datenkanal erstellen
 	dataChan := make(chan *Block)
@@ -510,6 +547,51 @@ func AddSignedBlockWithUserKey(chain *Blockchain, data string, privateKey *rsa.P
 
 	return nil
 }
+func EncryptData(data string, key []byte) ([]byte, error) {
+	plaintext := []byte(data)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+
+	return ciphertext, nil
+}
+func TrackBlockchainFlow(chain *Blockchain) {
+	fmt.Println("Tracking Blockchain Flow:")
+
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			currentBlockCount := len(chain.Blocks)
+			if currentBlockCount > 1 {
+				fmt.Printf("New block added! Total blocks: %d\n", currentBlockCount)
+			}
+		}
+	}()
+	fmt.Println("Press 'q' to stop tracking.")
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		char, _, err := reader.ReadRune()
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
+		if char == 'q' || char == 'Q' {
+			fmt.Println("Stopped tracking Blockchain Flow.")
+			break
+		}
+	}
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -530,6 +612,8 @@ func main() {
 
 	network.PrintPeers()
 
+	TrackBlockchainFlow(chain)
+
 	for {
 		fmt.Println("Choose an option:")
 		fmt.Println("1. Insert Text")
@@ -546,7 +630,8 @@ func main() {
 		fmt.Println("12. Read jpeg-image.")
 		fmt.Println("13. Load blocks from DB")
 		fmt.Println("14. Load and Display Images")
-		fmt.Println("15. Exit")
+		fmt.Println("15. Encrypt Text")
+		fmt.Println("16. Exit")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -747,6 +832,26 @@ func main() {
 				continue
 			}
 		case 15:
+			fmt.Print("Enter text to encrypt and save in a block:")
+			text, _ := reader.ReadString('\n')
+			text = strings.TrimSpace(text)
+
+			key := make([]byte, 32)
+			if _, err := rand.Read(key); err != nil {
+				fmt.Printf("Error generating encryption key: %s\n", err)
+				continue
+			}
+			encryptedData, err := EncryptData(text, key)
+			if err != nil {
+				fmt.Printf("Error encrypted data: %s\n", err)
+				continue
+			}
+			encryptedHex := hex.EncodeToString(encryptedData)
+
+			chain.AddBlock(encryptedHex)
+
+			fmt.Printf("Data encrypted and saved in a block.\nEncryption key: %x\n", key)
+		case 16:
 			fmt.Println("Exit!")
 			os.Exit(0)
 
