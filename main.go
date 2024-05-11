@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -592,6 +593,109 @@ func TrackBlockchainFlow(chain *Blockchain) {
 		}
 	}
 }
+func LogBlockchain(chain *Blockchain, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+
+	}
+	defer file.Close()
+
+	for _, block := range chain.Blocks {
+		_, err := file.WriteString(fmt.Sprintf("Block ID; %d\n"))
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString(fmt.Sprintf("Data: %s\n", block.Data))
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString(fmt.Sprintf("Tiemstamp: %s\n", block.Timestamp))
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString(fmt.Sprintf("Pervious Hash: %s\n", block.PreviousHash))
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString(fmt.Sprintf("Hash: %s\n", block.Hash))
+		if err != nil {
+			return err
+		}
+		_, err = file.WriteString("\n")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func RunBlockchainAPI(chain *Blockchain, network *Network, db *sql.DB) {
+	http.HandleFunc("/blocks", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			blocksJSON, err := json.Marshal(chain.Blocks)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "aplication/json")
+			w.Write(blocksJSON)
+		case http.MethodPost:
+			body, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			defer r.Body.Close()
+
+			data := string(body)
+			chain.AddBlock(data)
+
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte("Block added successfully"))
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			// Logik zum Abrufen der Peers und Senden als JSON-Antwort
+			peersJSON, err := json.Marshal(network.Peers)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(peersJSON)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	http.HandleFunc("/blocks/log", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			// Logik zum Protokollieren der Blockchain in eine Datei
+			filename := r.FormValue("filename")
+			err := LogBlockchain(chain, filename)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Blockchain logged to file successfully"))
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	port := ":8080" // Ändern Sie den Port nach Bedarf
+	fmt.Printf("Starting blockchain API server on port %s...\n", port)
+	err := http.ListenAndServe(port, nil)
+	if err != nil {
+		log.Fatal("Server error:", err)
+	}
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -631,6 +735,7 @@ func main() {
 		fmt.Println("13. Load blocks from DB")
 		fmt.Println("14. Load and Display Images")
 		fmt.Println("15. Encrypt Text")
+		fmt.Println("16. Log-Blockchain")
 		fmt.Println("16. Exit")
 
 		reader := bufio.NewReader(os.Stdin)
@@ -852,11 +957,23 @@ func main() {
 
 			fmt.Printf("Data encrypted and saved in a block.\nEncryption key: %x\n", key)
 		case 16:
-			fmt.Println("Exit!")
+			fmt.Print("Enter filename to save blockchain log:")
+			logFilename, _ := reader.ReadString('\n')
+			logFilename = strings.TrimSpace(logFilename)
+			err := LogBlockchain(chain, logFilename)
+			if err != nil {
+				fmt.Printf("Error logging blockchain to file: %s\n", err)
+
+			} else {
+				fmt.Printf("Blockchain logged to file successfilly: %s\n", logFilename)
+			}
+		case 17:
+			fmt.Println("Exit...")
 			os.Exit(0)
 
 		default:
 			fmt.Println("Invalid option!")
 		}
 	}
+	RunBlockchainAPI(chain, network, db)
 }

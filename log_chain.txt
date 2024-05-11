@@ -1,0 +1,6 @@
+Block ID; %!d(MISSING)
+Data: Genesis Block
+Tiemstamp: 2024-05-11 13:16:54.77317333 +0200 CEST m=+0.002216687
+Pervious Hash: 
+Hash: 89eb0ac031a63d2421cd05a2fbe41f3ea35f5c3712ca839cbf6b85c4ee07b7a3
+
