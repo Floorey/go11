@@ -974,7 +974,8 @@ func main() {
 		default:
 			fmt.Println("Invalid option!")
 		}
-		RunBlockchainAPI(chain, network, db)
+
 	}
+	RunBlockchainAPI(chain, network, db)
 
 }
