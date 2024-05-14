@@ -66,6 +66,23 @@ type Transaction struct {
 	Fee       float64
 }
 
+// SendMessageToPeer sendet eine Nachricht von einem Peer an einen anderen.
+func (n *Network) SendMessageToPeer(senderID int, receiverID int, message string) error {
+	sender := n.GetPeerByID(senderID)
+	if sender == nil {
+		return fmt.Errorf("Sender with ID %d not found", senderID)
+	}
+
+	receiver := n.GetPeerByID(receiverID)
+	if receiver == nil {
+		return fmt.Errorf("Receiver with ID %d not found", receiverID)
+	}
+
+	// Simuliere den Nachrichtenversand
+	fmt.Printf("Message sent from Peer %d to Peer %d: %s\n", senderID, receiverID, message)
+	return nil
+}
+
 func CreateTransaction(sender, recipient string, amount, fee float64) *Transaction {
 	return &Transaction{
 		Sender:    sender,
@@ -378,6 +395,53 @@ func TestPeers(network *Network) {
 		}(peer)
 	}
 }
+func SyncBlockchainWithPeers(chain *Blockchain, network *Network) {
+	for _, peer := range network.Peers {
+		go func(peer *Peer) {
+			// Verbindung zum Peer herstellen
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port), 5*time.Second)
+			if err != nil {
+				fmt.Printf("Failed to connect to peer %s:%d\n", peer.IP, peer.Port)
+				return
+			}
+			defer conn.Close()
+
+			// Synchronisieren der Blockchain mit dem Peer
+			encoder := json.NewEncoder(conn)
+			decoder := json.NewDecoder(conn)
+
+			// Anfrage für die Blockchain des Peers senden
+			err = encoder.Encode("get_blocks")
+			if err != nil {
+				fmt.Printf("Error sending get_blocks request to peer %s:%d: %s\n", peer.IP, peer.Port, err)
+				return
+			}
+
+			// Antwort vom Peer empfangen
+			var peerBlocks []*Block
+			err = decoder.Decode(&peerBlocks)
+			if err != nil {
+				fmt.Printf("Error receiving blocks from peer %s:%d: %s\n", peer.IP, peer.Port, err)
+				return
+			}
+
+			// Neue Blöcke in die lokale Blockchain einfügen
+			for _, block := range peerBlocks {
+				if chain.Head == nil || block.ID > chain.Head.ID {
+					// Überprüfen, ob der Block gültig ist, bevor er eingefügt wird
+					if chain.ValidateBlock(block) {
+						chain.Blocks = append(chain.Blocks, block)
+						chain.Head = block
+						fmt.Printf("Added new block from peer %s:%d\n", peer.IP, peer.Port)
+					} else {
+						fmt.Printf("Received invalid block from peer %s:%d, block ID: %d\n", peer.IP, peer.Port, block.ID)
+					}
+				}
+			}
+		}(peer)
+	}
+}
+
 func loadImageFromJPEG(filename string) ([]byte, error) {
 	imageData, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -696,6 +760,14 @@ func RunBlockchainAPI(chain *Blockchain, network *Network, db *sql.DB) {
 		log.Fatal("Server error:", err)
 	}
 }
+func (n *Network) GetPeerByID(id int) *Peer {
+	for _, peer := range n.Peers {
+		if peer.ID == id {
+			return peer
+		}
+	}
+	return nil
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -736,7 +808,8 @@ func main() {
 		fmt.Println("14. Load and Display Images")
 		fmt.Println("15. Encrypt Text")
 		fmt.Println("16. Log-Blockchain")
-		fmt.Println("16. Exit")
+		fmt.Println("17. Comunicate between Peers")
+		fmt.Println("18. Exit")
 
 		reader := bufio.NewReader(os.Stdin)
 		optionStr, _ := reader.ReadString('\n')
@@ -968,6 +1041,39 @@ func main() {
 				fmt.Printf("Blockchain logged to file successfilly: %s\n", logFilename)
 			}
 		case 17:
+			fmt.Println("Enter source Peer ID:")
+			sourceIDStr, _ := reader.ReadString('\n')
+			sourceIDStr = strings.TrimSpace(sourceIDStr)
+			sourceID, err := strconv.Atoi(sourceIDStr)
+			if err != nil {
+				fmt.Println("Invalid Peer ID. Please enter a valid number!")
+				continue
+			}
+			fmt.Println("Enter destination Peer ID:")
+			destIDStr, _ := reader.ReadString('\n')
+			destIDStr = strings.TrimSpace(destIDStr)
+			destID, err := strconv.Atoi(destIDStr)
+			if err != nil {
+				fmt.Println("Invalid Peer ID. Please enter a valid number!")
+				continue
+			}
+			fmt.Println("Enter a message to send:")
+			message, _ := reader.ReadString('\n')
+			message = strings.TrimSpace(message)
+
+			sourcePeer := network.GetPeerByID(sourceID)
+			destPeer := network.GetPeerByID(destID)
+			if sourcePeer == nil || destPeer == nil {
+				fmt.Println("Invalid source or destination Peer ID. Please try agein!")
+				continue
+			}
+			sendErr := network.SendMessageToPeer(sourcePeer.ID, destPeer.ID, message)
+			if sendErr != nil {
+				fmt.Printf("Error sending message from Peer %d to Peer %d: %s\n", sourceID, destID, err)
+			} else {
+				fmt.Printf("Message sent successfully from Peer %d to Peer %d\n", sourceID, destID)
+			}
+		case 18:
 			fmt.Println("Exit...")
 			os.Exit(0)
 
