@@ -768,6 +768,20 @@ func (n *Network) GetPeerByID(id int) *Peer {
 	}
 	return nil
 }
+func LogActivity(activity string) error {
+	file, err := os.OpenFile("activity.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	logLine := fmt.Sprintf("[%s] %s\n", time.Now().Format(time.RFC3339), activity)
+	_, err = file.WriteString(logLine)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func main() {
 	db, err := sql.Open("sqlite3", "./blockchain.db")
@@ -785,6 +799,8 @@ func main() {
 
 	network.AddPeer(peer1)
 	network.AddPeer(peer2)
+
+	LogActivity("Peers added to network.")
 
 	network.PrintPeers()
 
@@ -827,15 +843,27 @@ func main() {
 			text = strings.TrimSpace(text)
 			chain.AddBlock(text)
 			fmt.Println("Text inserted and saved in a block!")
+			LogActivity("text added to Blockchain")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 2:
 			fmt.Print("Enter text to save in a block: ")
 			text, _ := reader.ReadString('\n')
 			text = strings.TrimSpace(text)
 			chain.AddBlock(text)
 			fmt.Println("Text saved in a block.")
+			LogActivity("Text entered to Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 3:
 			fmt.Println("Current Block:")
 			chain.PrintBlockchain()
+			LogActivity("Block printed.")
+			if err != nil {
+				fmt.Printf("Error printing the Block.")
+			}
 		case 4:
 			fmt.Print("Enter filename to save hashes: ")
 			filename, _ := reader.ReadString('\n')
@@ -845,6 +873,10 @@ func main() {
 				fmt.Printf("Error logging hashes to file: %s\n", err)
 			} else {
 				fmt.Println("Hashes logged to file successfully.")
+			}
+			LogActivity("Hashes saved!")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 5:
 			fmt.Print("Enter filename to read text from: ")
@@ -866,6 +898,10 @@ func main() {
 				fmt.Println("Text read from file and saved in a block:", text)
 			case err := <-errCh:
 				fmt.Printf("Error reading text from file: %s\n", err)
+			}
+			LogActivity("Filename read from a Block")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 6:
 			fmt.Print("Enter filename to read CSV from: ")
@@ -892,6 +928,10 @@ func main() {
 			case err := <-errCh:
 				fmt.Printf("Error reading CSV from file: %s\n", err)
 			}
+			LogActivity("CSV file read from Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 7:
 			fmt.Print("Enter filename to read JSON from: ")
 			filename, _ := reader.ReadString('\n')
@@ -912,6 +952,10 @@ func main() {
 				chain.AddBlock(string(jsonText))
 				fmt.Println("JSON read from file and saved in a block:", jsonData)
 			}
+			LogActivity("JASON read from Block-file.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 8:
 			fmt.Print("Enter filename to read PDF from: ")
 			filename, _ := reader.ReadString('\n')
@@ -922,6 +966,10 @@ func main() {
 			} else {
 				chain.AddBlock(text) // Text als Block an die Blockchain anhängen
 				fmt.Println("Text read from PDF file and saved in a block:", text)
+			}
+			LogActivity("PDF file read from Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 9:
 			// Code für Option 9 (Block validieren)
@@ -944,6 +992,10 @@ func main() {
 			} else {
 				fmt.Println("Block is not valid!")
 			}
+			LogActivity("Block validated!")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 10:
 			fmt.Println("Enter index of the block to display:")
 			indexStr, _ := reader.ReadString('\n')
@@ -954,6 +1006,11 @@ func main() {
 				continue
 			}
 			PrintBlockByIndex(chain, index)
+
+			LogActivity("Display Block!")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 11:
 			if chain.DB != nil {
 				fmt.Println("Blockchain saving to database is currently enabled. Disabling...")
@@ -961,6 +1018,10 @@ func main() {
 			} else {
 				fmt.Println("Blockchain saving to database is currently disabled. Enabling...")
 				chain.DB = db
+			}
+			LogActivity("Blcokchain saved to DB.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 12:
 			fmt.Print("Enter path to JPEG image: ")
@@ -975,6 +1036,12 @@ func main() {
 			imageStr := string(imageData)
 			chain.AddBlock(imageStr)
 			fmt.Println("Image saved in a block.")
+
+			LogActivity("Image seved into Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
+
 		case 13:
 			blocks, err := RetrieveBlocksFromDB(db)
 			if err != nil {
@@ -984,6 +1051,10 @@ func main() {
 			fmt.Println("Blocks loaded successfully from the database:")
 			for _, block := range blocks {
 				fmt.Printf("ID: %d, Data: %s, Timestamp: %s\n", block.ID, block.Data, block.Timestamp)
+			}
+			LogActivity("Read Blocks from DB.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 14:
 			fmt.Println("Enter the ID of the block to load and display the image:")
@@ -1009,6 +1080,11 @@ func main() {
 				fmt.Printf("Error displaying image from block: %s\n", err)
 				continue
 			}
+			LogActivity("Imgage read from Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
+
 		case 15:
 			fmt.Print("Enter text to encrypt and save in a block:")
 			text, _ := reader.ReadString('\n')
@@ -1029,6 +1105,11 @@ func main() {
 			chain.AddBlock(encryptedHex)
 
 			fmt.Printf("Data encrypted and saved in a block.\nEncryption key: %x\n", key)
+			LogActivity("Encrypted Text saved to Block.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
+
 		case 16:
 			fmt.Print("Enter filename to save blockchain log:")
 			logFilename, _ := reader.ReadString('\n')
@@ -1039,6 +1120,10 @@ func main() {
 
 			} else {
 				fmt.Printf("Blockchain logged to file successfilly: %s\n", logFilename)
+			}
+			LogActivity("Seved blockchain log:")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
 			}
 		case 17:
 			fmt.Println("Enter source Peer ID:")
@@ -1073,9 +1158,17 @@ func main() {
 			} else {
 				fmt.Printf("Message sent successfully from Peer %d to Peer %d\n", sourceID, destID)
 			}
+			LogActivity("Communication between Blocks.")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 		case 18:
 			fmt.Println("Exit...")
 			os.Exit(0)
+			LogActivity("Exit Program")
+			if err != nil {
+				fmt.Printf("Error logging activity: %s\n", err)
+			}
 
 		default:
 			fmt.Println("Invalid option!")
